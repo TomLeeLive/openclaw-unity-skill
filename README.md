@@ -1,5 +1,9 @@
 # 🐾 OpenClaw Unity Skill
 
+> **TL;DR:** Vibe-code your game development remotely from anywhere! 🌍
+> 
+> **한줄요약:** 이제 집밖에서도 원격으로 바이브코딩으로 게임 개발 가능합니다! 🎮
+
 Companion skill for the [OpenClaw Unity Plugin](https://github.com/TomLeeLive/openclaw-unity-plugin). Provides AI workflow patterns and gateway extension for Unity Editor control.
 
 ## Installation
