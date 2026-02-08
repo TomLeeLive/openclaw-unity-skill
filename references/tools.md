@@ -16,6 +16,15 @@ Get Unity console logs.
 ### console.clear
 Clear captured logs. No parameters.
 
+### console.getErrors
+Get error and exception logs.
+```json
+{
+  "count": 50,              // Max errors to return (default: 50)
+  "includeWarnings": false  // Include warnings (default: false)
+}
+```
+
 ---
 
 ## Scene Tools

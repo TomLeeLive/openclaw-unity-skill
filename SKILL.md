@@ -62,8 +62,9 @@ unity_execute: editor.recompile         # Request recompilation only
 
 ## Tool Categories
 
-### Console (2 tools)
+### Console (3 tools)
 - `console.getLogs` - Get logs with optional type filter (Log/Warning/Error)
+- `console.getErrors` - Get error/exception logs (with optional warnings)
 - `console.clear` - Clear captured logs
 
 ### Scene (4 tools)
