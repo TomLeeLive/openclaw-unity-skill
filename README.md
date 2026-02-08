@@ -1,63 +1,59 @@
-# OpenClaw Unity Skill
+# 🐾 OpenClaw Unity Skill
 
-OpenClaw skill for controlling Unity Editor via [OpenClaw Unity Plugin](https://github.com/TomLeeLive/openclaw-unity-plugin).
+Companion skill for the [OpenClaw Unity Plugin](https://github.com/TomLeeLive/openclaw-unity-plugin). Provides AI workflow patterns and gateway extension for Unity Editor control.
 
 ## Installation
 
-### Option 1: Local Skill
+```bash
+# Clone to OpenClaw workspace
+git clone https://github.com/TomLeeLive/openclaw-unity-skill.git ~/.openclaw/workspace/skills/unity-plugin
 
-Copy the skill folder to your OpenClaw workspace:
+# Install gateway extension
+cd ~/.openclaw/workspace/skills/unity-plugin
+./scripts/install-extension.sh
+
+# Restart gateway
+openclaw gateway restart
+```
+
+## What's Included
+
+```
+unity-plugin/
+├── SKILL.md           # AI workflow guide (44 tools)
+├── extension/         # Gateway extension (required)
+│   ├── index.ts
+│   ├── openclaw.plugin.json
+│   └── package.json
+├── scripts/
+│   └── install-extension.sh
+└── references/
+    └── tools.md       # Detailed tool documentation
+```
+
+## Components
+
+| Component | Purpose | Location |
+|-----------|---------|----------|
+| **Gateway Extension** | Enables `unity_execute` tool | `~/.openclaw/extensions/unity/` |
+| **Skill** | AI workflow patterns | `~/.openclaw/workspace/skills/unity-plugin/` |
+| **Unity Package** | Unity Editor plugin | [openclaw-unity-plugin](https://github.com/TomLeeLive/openclaw-unity-plugin) |
+
+## Quick Verify
 
 ```bash
-cp -r . ~/.openclaw/workspace/skills/unity-plugin
-```
+# Check extension loaded
+openclaw unity status
 
-### Option 2: Git URL (if supported)
-
-```
-https://github.com/TomLeeLive/openclaw-unity-skill.git
+# Check skill available
+ls ~/.openclaw/workspace/skills/unity-plugin/SKILL.md
 ```
 
 ## Requirements
 
 - [OpenClaw](https://github.com/openclaw/openclaw) 2026.2.3+
-- [OpenClaw Unity Plugin](https://github.com/TomLeeLive/openclaw-unity-plugin) installed in Unity
-
-## Features
-
-This skill provides guidance for 44 Unity control tools:
-
-- **Scene Management** - List, load, inspect scenes
-- **GameObject Control** - Create, find, modify, destroy objects
-- **Component Editing** - Add, remove, get/set component properties
-- **Debug Tools** - Screenshots, hierarchy view, console logs
-- **Input Simulation** - Keyboard, mouse, UI clicks for game testing
-- **Editor Control** - Play mode, pause, recompile, asset refresh
-
-## Usage
-
-The skill automatically activates when you ask about Unity-related tasks:
-
-```
-"What's in my Unity scene?"
-"Create a cube at position (0, 5, 0)"
-"Click the Play button and take a screenshot"
-"Recompile Unity scripts"
-```
-
-## Files
-
-```
-unity-plugin/
-├── SKILL.md              # Main skill guide
-└── references/
-    └── tools.md          # Complete tool parameter reference
-```
+- [OpenClaw Unity Plugin](https://github.com/TomLeeLive/openclaw-unity-plugin) in Unity
 
 ## License
 
 MIT License - See [LICENSE](LICENSE)
-
----
-
-Part of the [OpenClaw](https://github.com/openclaw/openclaw) ecosystem.

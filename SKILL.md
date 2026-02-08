@@ -5,6 +5,20 @@ description: Control Unity Editor via OpenClaw Unity Plugin. Use for Unity game 
 
 # Unity Plugin Skill
 
+## First-Time Setup
+
+If `unity_execute` tool is not available, install the gateway extension:
+
+```bash
+# From skill directory
+./scripts/install-extension.sh
+
+# Restart gateway
+openclaw gateway restart
+```
+
+The extension files are in `extension/` directory.
+
 Control Unity Editor through 44 built-in tools. Works in both Editor and Play mode.
 
 ## Quick Reference
