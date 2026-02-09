@@ -19,7 +19,7 @@ openclaw gateway restart
 
 The extension files are in `extension/` directory.
 
-Control Unity Editor through 50 built-in tools. Works in both Editor and Play mode.
+Control Unity Editor through 52 built-in tools. Works in both Editor and Play mode.
 
 ## Quick Reference
 
