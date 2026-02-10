@@ -3,6 +3,7 @@ name: unity-plugin
 description: Control Unity Editor via OpenClaw Unity Plugin. Use for Unity game development tasks including scene management, GameObject/Component manipulation, debugging, input simulation, and Play mode control. Triggers on Unity-related requests like inspecting scenes, creating objects, taking screenshots, testing gameplay, or controlling the Editor.
 homepage: https://github.com/TomLeeLive/openclaw-unity-skill
 author: Tom Jaejoon Lee
+disableModelInvocation: true
 ---
 
 # Unity Plugin Skill
@@ -37,52 +38,13 @@ The extension files are in `extension/` directory.
 # After installation, restart gateway to load the extension.
 ```
 
-## 🔐 Security: Model Invocation Setting
+## 🔐 Security
 
-When publishing to ClawHub, configure `disableModelInvocation`:
-
-| Setting | AI Auto-Invoke | User Explicit Request |
-|---------|---------------|----------------------|
-| `false` (default) | ✅ Allowed | ✅ Allowed |
-| `true` | ❌ Blocked | ✅ Allowed |
-
-### `disableModelInvocation: false` (기본값)
-
-**장점:**
-- AI가 자율적으로 보조 작업 수행 (hierarchy 검사, 스크린샷, 컴포넌트 확인)
-- 대화 중 맥락에 맞게 자동으로 필요한 도구 호출
-- 개발 워크플로우가 더 자연스럽고 빠름
-- "씬 구조 보여줘" → AI가 바로 `debug.hierarchy` 실행
-
-**단점:**
-- AI가 의도치 않은 작업을 수행할 가능성
-- 토큰 사용량 증가 (자동 도구 호출)
-- 민감한 작업에는 부적합
-
-**적합한 경우:** 개발/디버깅, 프로토타이핑, 학습 목적
-
----
-
-### `disableModelInvocation: true`
-
-**장점:**
+이 스킬은 `disableModelInvocation: true`로 설정되어 있습니다.
+- AI가 자동으로 도구를 호출하지 않음
 - 사용자가 명시적으로 요청한 작업만 실행
-- 예측 가능한 동작 - AI가 임의로 도구 호출 안함
-- 민감한 환경에서 안전
-- 토큰 사용량 절약
 
-**단점:**
-- 매번 도구 사용을 명시적으로 요청해야 함
-- 워크플로우가 덜 자연스러움
-- AI의 자율적 보조 기능 제한
-
-**적합한 경우:** 프로덕션 환경, 민감한 데이터, 엄격한 제어 필요시
-
----
-
-### 권장: **`false`** (Unity 개발용)
-
-Unity 개발 시 AI가 hierarchy 검사, 스크린샷, 상태 확인 등을 자율적으로 수행하는 것이 생산성에 도움됩니다.
+설정 변경 방법은 [README.md](README.md)를 참조하세요.
 
 ## Quick Reference
 
