@@ -1,9 +1,13 @@
 ---
 name: unity-plugin
 description: Control Unity Editor via OpenClaw Unity Plugin. Use for Unity game development tasks including scene management, GameObject/Component manipulation, debugging, input simulation, and Play mode control. Triggers on Unity-related requests like inspecting scenes, creating objects, taking screenshots, testing gameplay, or controlling the Editor.
+homepage: https://github.com/TomLeeLive/openclaw-unity-skill
+author: Tom Jaejoon Lee
 ---
 
 # Unity Plugin Skill
+
+Control Unity Editor through 52+ built-in tools. Works in both Editor and Play mode.
 
 ## First-Time Setup
 
@@ -19,7 +23,34 @@ openclaw gateway restart
 
 The extension files are in `extension/` directory.
 
-Control Unity Editor through 52 built-in tools. Works in both Editor and Play mode.
+### What install-extension.sh Does
+
+```bash
+# 1. Copies extension files from skill to gateway
+#    Source: <skill>/extension/
+#    Destination: ~/.openclaw/extensions/unity/
+
+# 2. Files installed:
+#    - index.ts     # Extension entry point (HTTP handlers, tools)
+#    - package.json # Extension metadata
+
+# After installation, restart gateway to load the extension.
+```
+
+## 🔐 Security: Model Invocation Setting
+
+When publishing to ClawHub, configure `disableModelInvocation`:
+
+| Setting | AI Auto-Invoke | User Explicit Request |
+|---------|---------------|----------------------|
+| `false` (default) | ✅ Allowed | ✅ Allowed |
+| `true` | ❌ Blocked | ✅ Allowed |
+
+### Recommendation: **`false`** (default)
+
+**Reason:** During Unity development, AI autonomously performing hierarchy inspection, screenshots, and component checks is useful.
+
+**When to use `true`:** For sensitive tools (payments, deletions, message sending, etc.)
 
 ## Quick Reference
 
@@ -47,8 +78,8 @@ unity_execute: scene.getActive
 
 ```
 unity_execute: gameobject.find {name: "Player"}
-unity_execute: component.get {objectName: "Player", componentType: "Transform"}
-unity_execute: transform.setPosition {objectName: "Player", x: 0, y: 5, z: 0}
+unity_execute: component.get {name: "Player", componentType: "Transform"}
+unity_execute: transform.setPosition {name: "Player", x: 0, y: 5, z: 0}
 ```
 
 ### 3. UI Testing
@@ -176,3 +207,13 @@ editor.refresh    # Full asset refresh + recompile
 | No connection | Verify `openclaw unity status`, check gateway |
 | Scripts not updating | Use `editor.refresh` to force recompile |
 | Wrong screenshot | Use Play mode for game view with UI |
+
+## Links
+
+- **Skill Repository:** https://github.com/TomLeeLive/openclaw-unity-skill
+- **Plugin Repository:** https://github.com/TomLeeLive/openclaw-unity-mcp
+- **OpenClaw Docs:** https://docs.openclaw.ai
+
+## License
+
+MIT License - See LICENSE file
