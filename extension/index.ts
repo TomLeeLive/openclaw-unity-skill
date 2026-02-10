@@ -1,5 +1,5 @@
 /**
- * OpenClaw Unity Bridge Plugin
+ * OpenClaw Unity Plugin
  * Connects Unity Editor to OpenClaw AI assistant via HTTP
  */
 
@@ -13,11 +13,11 @@ interface UnitySession {
   projectName: string;
   unityVersion: string;
   platform: string;
-  tools: Array<{ name: string; description: string }>;
+  toolCount: number;
   pendingCommands: Array<{
-    requestId: string;
+    toolCallId: string;
     tool: string;
-    parameters: string;
+    arguments: Record<string, any>;
     createdAt: number;
   }>;
   results: Map<string, any>;
@@ -31,7 +31,7 @@ function generateId(): string {
   return `unity_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 }
 
-// Clean up stale sessions (no heartbeat for 60 seconds)
+// Clean up stale sessions (no heartbeat for 2 minutes)
 function cleanupStaleSessions() {
   const now = Date.now();
   const staleThreshold = 120000; // 2 minutes
@@ -120,7 +120,7 @@ async function handleUnityHttpRequest(
         }
         
         const body = await readJsonBody(req);
-        const { type, version, project, platform, tools } = body;
+        const { project, version, platform, tools } = body;
         
         const sessionId = generateId();
         const session: UnitySession = {
@@ -129,8 +129,8 @@ async function handleUnityHttpRequest(
           lastHeartbeat: Date.now(),
           projectName: project || "Unknown",
           unityVersion: version || "Unknown",
-          platform: platform || "Unknown",
-          tools: tools || [],
+          platform: platform || "UnityEditor",
+          toolCount: tools || 0,
           pendingCommands: [],
           results: new Map(),
         };
@@ -178,7 +178,9 @@ async function handleUnityHttpRequest(
           const command = session.pendingCommands.shift()!;
           sendJson(res, 200, command);
         } else {
-          sendJson(res, 200, null);
+          // No content
+          res.statusCode = 204;
+          res.end();
         }
         return true;
       }
@@ -190,7 +192,7 @@ async function handleUnityHttpRequest(
         }
         
         const body = await readJsonBody(req);
-        const { sessionId, requestId, tool, success, result, error } = body;
+        const { sessionId, toolCallId, result } = body;
         
         const session = sessions.get(sessionId);
         if (!session) {
@@ -198,29 +200,9 @@ async function handleUnityHttpRequest(
           return true;
         }
         
-        session.results.set(requestId, { success, result, error, tool });
-        console.log(`[Unity] Tool result: ${tool} - ${success ? "success" : "failed"}`);
+        session.results.set(toolCallId, result);
+        console.log(`[Unity] Tool result received for: ${toolCallId}`);
         
-        sendJson(res, 200, { ok: true });
-        return true;
-      }
-      
-      case "message": {
-        if (req.method !== "POST") {
-          sendJson(res, 405, { error: "Method not allowed" });
-          return true;
-        }
-        
-        const body = await readJsonBody(req);
-        const { sessionId, message } = body;
-        
-        const session = sessions.get(sessionId);
-        if (!session) {
-          sendJson(res, 404, { error: "Session not found" });
-          return true;
-        }
-        
-        console.log(`[Unity] Message from ${session.projectName}: ${message}`);
         sendJson(res, 200, { ok: true });
         return true;
       }
@@ -257,7 +239,7 @@ async function handleUnityHttpRequest(
 
 const plugin = {
   id: "unity",
-  name: "Unity Bridge",
+  name: "Unity Plugin",
   description: "Connect Unity Editor to OpenClaw AI assistant",
   
   register(api: OpenClawPluginApi) {
@@ -274,7 +256,7 @@ const plugin = {
     // Tool: Execute a Unity command
     api.registerTool({
       name: "unity_execute",
-      description: "Execute a tool in the connected Unity Editor. Available tools: console.getLogs, scene.getData, gameobject.find, gameobject.create, transform.setPosition, component.get, debug.hierarchy, app.getState, and more.",
+      description: "Execute a tool in the connected Unity Editor. Available tools: console.getLogs, scene.getData, gameobject.find, gameobject.create, gameobject.delete, gameobject.setActive, transform.setPosition, transform.setRotation, transform.setScale, component.get, component.add, debug.hierarchy, debug.screenshot, app.getState, app.play, app.stop, input.simulateKey, input.simulateMouse, and more.",
       parameters: {
         type: "object" as const,
         properties: {
@@ -284,7 +266,7 @@ const plugin = {
         },
         required: ["tool"] as const,
       },
-      execute: async (_toolCallId: string, args: any) => {
+      execute: async (toolCallId: string, args: any) => {
         // Helper to format result for OpenClaw
         const jsonResult = (payload: any) => ({
           content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],
@@ -317,16 +299,16 @@ const plugin = {
         if (!session) {
           return jsonResult({
             success: false,
-            error: "No Unity session connected. Make sure Unity is running with OpenClaw Bridge in Play mode.",
+            error: "No Unity session connected. Make sure Unity Editor is running with OpenClaw plugin enabled.",
           });
         }
         
         // Create command
         const requestId = generateId();
         session.pendingCommands.push({
-          requestId,
+          toolCallId: requestId,
           tool,
-          parameters: JSON.stringify(parameters || {}),
+          arguments: parameters || {},
           createdAt: Date.now(),
         });
         
@@ -341,17 +323,10 @@ const plugin = {
             const result = session.results.get(requestId);
             session.results.delete(requestId);
             
-            if (result.success) {
-              return jsonResult({
-                success: true,
-                result: result.result,
-              });
-            } else {
-              return jsonResult({
-                success: false,
-                error: result.error,
-              });
-            }
+            return jsonResult({
+              success: true,
+              result,
+            });
           }
           
           await new Promise(resolve => setTimeout(resolve, 100));
@@ -359,7 +334,7 @@ const plugin = {
         
         return jsonResult({
           success: false,
-          error: "Timeout waiting for Unity response. Make sure Unity is in Play mode and the bridge is active.",
+          error: "Timeout waiting for Unity response. Make sure the OpenClaw plugin is enabled in Unity Editor.",
         });
       },
     });
@@ -381,7 +356,7 @@ const plugin = {
           project: s.projectName,
           version: s.unityVersion,
           platform: s.platform,
-          tools: s.tools.length,
+          tools: s.toolCount,
         }));
         
         const payload = {
@@ -403,21 +378,21 @@ const plugin = {
       ({ program }) => {
         const unityCmd = program
           .command("unity")
-          .description("Unity Bridge commands");
+          .description("Unity Plugin commands");
         
         unityCmd
           .command("status")
           .description("Show Unity connection status")
           .action(() => {
-            console.log("\n🎮 Unity Bridge Status\n");
+            console.log("\n🎮 Unity Plugin Status\n");
             
             if (sessions.size === 0) {
               console.log("  No Unity sessions connected.\n");
               console.log("  To connect Unity:");
-              console.log("  1. Install OpenClaw Unity Bridge package");
+              console.log("  1. Install OpenClaw Unity Plugin package");
               console.log("  2. Configure Gateway URL: http://localhost:18789");
-              console.log("  3. Add OpenClawBridge to your scene");
-              console.log("  4. Enter Play Mode\n");
+              console.log("  3. Enable plugin in Window > OpenClaw");
+              console.log("  4. Check connection status\n");
               return;
             }
             
@@ -426,7 +401,7 @@ const plugin = {
               const lastSeen = Math.round((Date.now() - session.lastHeartbeat) / 1000);
               
               console.log(`  ✅ ${session.projectName}`);
-              console.log(`     Version: ${session.unityVersion}`);
+              console.log(`     Version: Unity ${session.unityVersion}`);
               console.log(`     Platform: ${session.platform}`);
               console.log(`     Session: ${id}`);
               console.log(`     Connected: ${age}s ago`);
@@ -438,7 +413,7 @@ const plugin = {
       { commands: ["unity"] }
     );
     
-    logger.info("[Unity] Bridge plugin loaded - HTTP endpoints at /unity/*");
+    logger.info("[Unity] Plugin loaded - HTTP endpoints at /unity/*");
   },
 };
 
