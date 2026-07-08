@@ -1,7 +1,7 @@
 ---
 name: unity-plugin
-version: 1.6.1
-description: Control Unity Editor via OpenClaw Unity Plugin. Use for Unity game development tasks including scene management, GameObject/Component manipulation, debugging, input simulation, and Play mode control. Triggers on Unity-related requests like inspecting scenes, creating objects, taking screenshots, testing gameplay, or controlling the Editor.
+version: 1.6.2
+description: Control Unity Editor via OpenClaw Unity Plugin. Use for Unity game development tasks including scene management, GameObject/Component manipulation, debugging, input simulation, and Play mode control — including arbitrary C# execution (script.execute) and reflection-based editor calls, which can modify scenes, assets, and settings. Use only in trusted local projects; destructive operations (delete, save, package install, code execution) should be confirmed with the user. Triggers on explicit Unity Editor requests like inspecting scenes, creating objects, taking screenshots, testing gameplay, or controlling the Editor.
 homepage: https://github.com/TomLeeLive/openclaw-unity-skill
 author: Tom Jaejoon Lee
 disableModelInvocation: true
@@ -389,6 +389,17 @@ Keyboard/mouse simulation works for **UI interactions** but NOT for `Input.GetKe
 | MCP 504 timeout | Unity busy or MCP Bridge not started |
 | Test Runner not found | Install `com.unity.test-framework` package |
 
+## Security & Privacy Disclosure
+
+This skill drives a live Unity Editor — treat it like giving a collaborator editor access. Full disclosure of capabilities:
+
+- **Arbitrary code execution (by design)**: `script.execute` compiles and runs C# inside the Unity process, and several tools use reflection to reach editor internals. This is the core of editor automation — it also means the skill can do anything the editor can. **Only use in trusted, version-controlled projects.** Ask the user to review C# snippets before running code they didn't write.
+- **Destructive operations** — confirm with the user before: deleting GameObjects/assets, saving scenes/projects, installing packages, simulating keyboard/mouse input, running `script.execute`.
+- **Package installation**: Git-based package installs import external, unvetted code into the project. Verify the source URL with the user first.
+- **Metadata**: the connection handshake includes machine name and process ID (used to route messages to the right editor instance). No other host information is collected or transmitted.
+- **Network surface**: MCP bridge listens on localhost port 27182. Keep it bound to localhost; do not expose the port beyond the local machine or a trusted network.
+- **Safety defaults**: `disableModelInvocation: true` is set — the model cannot auto-invoke this skill; it runs only on explicit user request. Keep project backups / source control current before automation sessions.
+
 ## Links
 
 - **Skill Repository:** https://github.com/TomLeeLive/openclaw-unity-skill
@@ -398,4 +409,4 @@ Keyboard/mouse simulation works for **UI interactions** but NOT for `Input.GetKe
 
 ## License
 
-MIT License - See LICENSE file
+Apache-2.0 — See LICENSE.md
