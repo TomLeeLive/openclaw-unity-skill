@@ -1,7 +1,7 @@
 {
   "name": "openclaw-unity-plugin",
-  "version": "1.6.2",
-  "description": "OpenClaw Unity Bridge Plugin \u2014 connect Unity Editor to OpenClaw",
+  "version": "1.6.3",
+  "description": "OpenClaw gateway extension for the Unity Editor bridge (installs into the OpenClaw gateway). Note: this is the gateway-side half \u2014 the Unity editor add-on is a separate install from github.com/TomLeeLive/openclaw-unity-plugin.",
   "main": "index.ts",
   "type": "module",
   "openclaw": {
