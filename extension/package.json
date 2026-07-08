@@ -1,5 +1,5 @@
 {
-  "name": "unity",
+  "name": "openclaw-unity-plugin",
   "version": "1.6.2",
   "description": "OpenClaw Unity Bridge Plugin \u2014 connect Unity Editor to OpenClaw",
   "main": "index.ts",
