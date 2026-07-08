@@ -60,14 +60,25 @@ async function readJsonBody(req: IncomingMessage, maxBytes = 1024 * 1024): Promi
     });
     
     req.on("end", () => {
+      const raw = Buffer.concat(chunks).toString("utf8");
+      if (!raw.trim()) {
+        resolve({});
+        return;
+      }
       try {
-        const raw = Buffer.concat(chunks).toString("utf8");
-        if (!raw.trim()) {
-          resolve({});
-          return;
-        }
         resolve(JSON.parse(raw));
       } catch (err) {
+        // Older Unity plugins on comma-decimal locales (e.g. pl-PL) emit
+        // "time":323,60 — repair bare-number commas and retry before failing.
+        const repaired = raw.replace(/(:\s*-?\d+),(\d+\s*[,}\]])/g, "$1.$2");
+        if (repaired !== raw) {
+          try {
+            resolve(JSON.parse(repaired));
+            return;
+          } catch {
+            // fall through to reject with the original error
+          }
+        }
         reject(err);
       }
     });
@@ -248,8 +259,20 @@ const plugin = {
     // Cleanup timer
     setInterval(cleanupStaleSessions, 30000);
     
-    // Register HTTP handler
-    api.registerHttpHandler(handleUnityHttpRequest);
+    // Register HTTP handler.
+    // OpenClaw ≥2026.3 removed registerHttpHandler in favor of registerHttpRoute —
+    // support both so the plugin loads on old and new gateways (issue #1).
+    const httpApi = api as any;
+    if (typeof httpApi.registerHttpRoute === "function") {
+      httpApi.registerHttpRoute({
+        path: "/unity",
+        auth: "plugin",
+        match: "prefix",
+        handler: handleUnityHttpRequest,
+      });
+    } else {
+      httpApi.registerHttpHandler(handleUnityHttpRequest);
+    }
     
     // ===== Agent Tools =====
     
