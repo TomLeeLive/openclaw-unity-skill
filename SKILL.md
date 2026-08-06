@@ -1,6 +1,6 @@
 ---
 name: unity-plugin
-version: 1.6.2
+version: 1.6.3
 description: Control Unity Editor via OpenClaw Unity Plugin. Use for Unity game development tasks including scene management, GameObject/Component manipulation, debugging, input simulation, and Play mode control — including arbitrary C# execution (script.execute) and reflection-based editor calls, which can modify scenes, assets, and settings. Use only in trusted local projects; destructive operations (delete, save, package install, code execution) should be confirmed with the user. Triggers on explicit Unity Editor requests like inspecting scenes, creating objects, taking screenshots, testing gameplay, or controlling the Editor.
 homepage: https://github.com/TomLeeLive/openclaw-unity-skill
 author: Tom Jaejoon Lee
