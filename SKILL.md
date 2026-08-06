@@ -52,13 +52,25 @@ The extension files are in `extension/` directory.
 # After installation, restart gateway to load the extension.
 ```
 
-## 🔐 Security
+## 🔐 Security: Model Invocation Setting
 
-이 스킬은 `disableModelInvocation: true`로 설정되어 있습니다.
-- AI가 자동으로 도구를 호출하지 않음
-- 사용자가 명시적으로 요청한 작업만 실행
+When publishing to ClawHub, `disableModelInvocation` controls who may start the skill:
 
-설정 변경 방법은 [README.md](README.md)를 참조하세요.
+| Setting | AI Auto-Invoke | User Explicit Request |
+|---------|---------------|----------------------|
+| `false` (default) | ✅ Allowed | ✅ Allowed |
+| `true` | ❌ Blocked | ✅ Allowed |
+
+### Recommendation: **`true`**
+
+**Reason:** this skill can execute arbitrary C# inside the Editor (`script.execute`)
+and call Editor APIs by reflection. That is the whole point of it, and it is also
+why it should never start on its own inference. As of v1.6.3 this skill ships with
+`disableModelInvocation: true` — it runs only on explicit user request.
+
+The full capability disclosure — arbitrary code execution, destructive operations,
+network surface — is in [Security & Privacy Disclosure](#security--privacy-disclosure)
+at the end of this document. **Read it before enabling the skill.**
 
 ## Quick Reference
 
@@ -398,6 +410,7 @@ This skill drives a live Unity Editor — treat it like giving a collaborator ed
 - **Package installation**: Git-based package installs import external, unvetted code into the project. Verify the source URL with the user first.
 - **Metadata**: the connection handshake includes machine name and process ID (used to route messages to the right editor instance). No other host information is collected or transmitted.
 - **Network surface**: MCP bridge listens on localhost port 27182. Keep it bound to localhost; do not expose the port beyond the local machine or a trusted network.
+- **Trigger scope**: routine-sounding requests ("clean up the scene", "save everything", "just try it") map to state-changing editor operations — confirm once before the first state-changing call in a session.
 - **Safety defaults**: `disableModelInvocation: true` is set — the model cannot auto-invoke this skill; it runs only on explicit user request. Keep project backups / source control current before automation sessions.
 
 ## Links
