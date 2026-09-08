@@ -1,4 +1,5 @@
-const sessions = /* @__PURE__ */ new Map();
+// extension/index.ts
+var sessions = /* @__PURE__ */ new Map();
 function generateId() {
   return `unity_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 }
@@ -10,6 +11,115 @@ function cleanupStaleSessions() {
       sessions.delete(id);
     }
   }
+}
+var ENGINE_LABEL = "Unity";
+var ALLOW_DESTRUCTIVE_ENV_VARS = [
+  "OPENCLAW_EDITOR_ALLOW_DESTRUCTIVE",
+  "OPENCLAW_UNITY_ALLOW_DESTRUCTIVE"
+];
+var READ_ONLY_VERB = /^(get|list|find|search|read|inspect|describe|query|exists|has|count|status|state|info|tree|hierarchy|screenshot|capture)/i;
+var NON_MUTATING_TOOLS = /* @__PURE__ */ new Set([
+  "debug.log",
+  // writes one line to the Editor console
+  "editor.focuswindow",
+  // moves Editor UI focus
+  "editor.listwindows",
+  "scriptableobject.load"
+  // loads an existing asset for inspection only
+]);
+var HIGH_RISK_NAME = /(execute|eval|delete|destroy|remove|install|uninstall|build|import|deploy|publish|reset|\brun\b)/i;
+var BATCH_TOOLS = /* @__PURE__ */ new Set(["batch.execute"]);
+var MAX_BATCH_DEPTH = 4;
+function currentEnv() {
+  return globalThis?.process?.env ?? {};
+}
+function isTruthyFlag(value) {
+  if (value === true) return true;
+  if (typeof value === "string") return /^(1|true|yes|on)$/i.test(value.trim());
+  return false;
+}
+function batchCommands(parameters) {
+  const commands = parameters?.commands ?? parameters?.calls;
+  return Array.isArray(commands) ? commands : null;
+}
+function classifyTool(tool, parameters, depth = 0) {
+  const name = typeof tool === "string" ? tool.trim() : "";
+  if (!name) return "project-changing";
+  const key = name.toLowerCase();
+  if (BATCH_TOOLS.has(key)) {
+    if (depth >= MAX_BATCH_DEPTH) return "project-changing";
+    const commands = batchCommands(parameters);
+    if (!commands || commands.length === 0) return "project-changing";
+    for (const command of commands) {
+      if (!command || typeof command !== "object") return "project-changing";
+      const sub = classifyTool(
+        command.tool,
+        command.params ?? command.parameters,
+        depth + 1
+      );
+      if (sub === "project-changing") return "project-changing";
+    }
+    return "read-only";
+  }
+  if (NON_MUTATING_TOOLS.has(key)) return "read-only";
+  if (HIGH_RISK_NAME.test(key)) return "project-changing";
+  const verb = key.includes(".") ? key.slice(key.lastIndexOf(".") + 1) : key;
+  return READ_ONLY_VERB.test(verb) ? "read-only" : "project-changing";
+}
+function projectChangingTools(tool, parameters, depth = 0) {
+  const name = typeof tool === "string" && tool.trim() ? tool.trim() : "(unnamed tool)";
+  const key = name.toLowerCase();
+  if (BATCH_TOOLS.has(key) && depth < MAX_BATCH_DEPTH) {
+    const commands = batchCommands(parameters);
+    if (!commands || commands.length === 0) return [name];
+    const found = [];
+    for (const command of commands) {
+      if (!command || typeof command !== "object") {
+        found.push(`${name} (malformed command)`);
+        continue;
+      }
+      found.push(
+        ...projectChangingTools(
+          command.tool,
+          command.params ?? command.parameters,
+          depth + 1
+        )
+      );
+    }
+    return found;
+  }
+  return classifyTool(name, parameters, depth) === "project-changing" ? [name] : [];
+}
+function destructiveOperationsEnabled(env = currentEnv()) {
+  return ALLOW_DESTRUCTIVE_ENV_VARS.some((name) => isTruthyFlag(env[name]));
+}
+function evaluateDestructiveGate(input) {
+  const env = input.env ?? currentEnv();
+  const risk = classifyTool(input.tool, input.parameters);
+  if (risk === "read-only") {
+    return { allowed: true, risk, tools: [], reason: "read-only" };
+  }
+  const tools = projectChangingTools(input.tool, input.parameters);
+  const listed = tools.length > 0 ? tools.join(", ") : "this call";
+  if (!destructiveOperationsEnabled(env)) {
+    return {
+      allowed: false,
+      risk,
+      tools,
+      reason: "operator-opt-in-missing",
+      message: `Refused: ${listed} would change this ${ENGINE_LABEL} project, and this gateway was not started with project-changing operations enabled. Ask the user to confirm the change, restart the gateway with ${ALLOW_DESTRUCTIVE_ENV_VARS[0]}=1 (or ${ALLOW_DESTRUCTIVE_ENV_VARS[1]}=1), then repeat the call with confirm: true. Read-only tools are unaffected; pass dryRun: true to preview a call without sending it.`
+    };
+  }
+  if (!isTruthyFlag(input.confirm)) {
+    return {
+      allowed: false,
+      risk,
+      tools,
+      reason: "confirmation-missing",
+      message: `Refused: ${listed} would change this ${ENGINE_LABEL} project. Confirm the change with the user, then repeat this call with confirm: true. Pass dryRun: true to preview it first.`
+    };
+  }
+  return { allowed: true, risk, tools, reason: "confirmed" };
 }
 async function readJsonBody(req, maxBytes = 1024 * 1024) {
   const chunks = [];
@@ -158,6 +268,7 @@ async function handleUnityHttpRequest(req, res) {
         }));
         sendJson(res, 200, {
           enabled: true,
+          destructiveOperations: destructiveOperationsEnabled() ? "enabled" : "blocked",
           sessions: activeSessions,
           sessionCount: activeSessions.length
         });
@@ -173,7 +284,7 @@ async function handleUnityHttpRequest(req, res) {
     return true;
   }
 }
-const plugin = {
+var plugin = {
   id: "unity",
   name: "Unity Plugin",
   description: "Connect Unity Editor to OpenClaw AI assistant",
@@ -193,13 +304,21 @@ const plugin = {
     }
     api.registerTool({
       name: "unity_execute",
-      description: "Execute a tool in the connected Unity Editor. Available tools: console.getLogs, scene.getData, gameobject.find, gameobject.create, gameobject.delete, gameobject.setActive, transform.setPosition, transform.setRotation, transform.setScale, component.get, component.add, debug.hierarchy, debug.screenshot, app.getState, app.play, app.stop, input.simulateKey, input.simulateMouse, and more.",
+      description: "Execute a tool in the connected Unity Editor. Available tools: console.getLogs, scene.getData, gameobject.find, gameobject.create, gameobject.delete, gameobject.setActive, transform.setPosition, transform.setRotation, transform.setScale, component.get, component.add, debug.hierarchy, debug.screenshot, app.getState, app.play, app.stop, input.simulateKey, input.simulateMouse, and more. Read-only tools (get*/list/find/read/debug.hierarchy/debug.screenshot) run directly. Project-changing tools are refused unless the gateway was started with OPENCLAW_EDITOR_ALLOW_DESTRUCTIVE=1 and the call passes confirm: true after the user approved the change; dryRun: true previews any call without sending it.",
       parameters: {
         type: "object",
         properties: {
           tool: { type: "string", description: "The Unity tool to execute (e.g., 'debug.hierarchy', 'gameobject.find')" },
           parameters: { type: "object", description: "Parameters for the tool (varies by tool)" },
-          sessionId: { type: "string", description: "Optional: specific Unity session ID" }
+          sessionId: { type: "string", description: "Optional: specific Unity session ID" },
+          confirm: {
+            type: "boolean",
+            description: "Required for project-changing tools (create/delete/save/set*, package.add, script.execute, input.*, editor.play). Set it only after the user has approved that specific change. Read-only tools ignore it."
+          },
+          dryRun: {
+            type: "boolean",
+            description: "Preview only: report how the call is classified and what would be sent to the Editor, without sending it."
+          }
         },
         required: ["tool"]
       },
@@ -215,6 +334,41 @@ const plugin = {
           return jsonResult({
             success: false,
             error: "Missing 'tool' parameter. Specify which Unity tool to execute (e.g., 'debug.hierarchy', 'gameobject.find')."
+          });
+        }
+        const gate = evaluateDestructiveGate({
+          tool,
+          parameters,
+          confirm: args?.confirm
+        });
+        if (isTruthyFlag(args?.dryRun)) {
+          return jsonResult({
+            success: true,
+            dryRun: true,
+            executed: false,
+            tool,
+            parameters: parameters || {},
+            risk: gate.risk,
+            projectChangingTools: gate.tools,
+            requiresConfirmation: gate.risk === "project-changing",
+            destructiveOperationsEnabled: destructiveOperationsEnabled(),
+            wouldRun: gate.allowed,
+            gate: { reason: gate.reason, message: gate.message }
+          });
+        }
+        if (!gate.allowed) {
+          logger.info(
+            `[Unity] Refused ${gate.risk} call: ${gate.tools.join(", ") || tool} (${gate.reason})`
+          );
+          return jsonResult({
+            success: false,
+            error: gate.message,
+            gate: {
+              allowed: false,
+              risk: gate.risk,
+              reason: gate.reason,
+              tools: gate.tools
+            }
           });
         }
         let session;
@@ -291,6 +445,9 @@ const plugin = {
         const unityCmd = program.command("unity").description("Unity Plugin commands");
         unityCmd.command("status").description("Show Unity connection status").action(() => {
           console.log("\n\u{1F3AE} Unity Plugin Status\n");
+          console.log(
+            destructiveOperationsEnabled() ? "  Project-changing tools: ENABLED (confirm: true still required per call)\n" : "  Project-changing tools: BLOCKED (start the gateway with OPENCLAW_EDITOR_ALLOW_DESTRUCTIVE=1 to enable)\n"
+          );
           if (sessions.size === 0) {
             console.log("  No Unity sessions connected.\n");
             console.log("  To connect Unity:");
@@ -321,5 +478,9 @@ const plugin = {
 };
 var extension_default = plugin;
 export {
-  extension_default as default
+  classifyTool,
+  extension_default as default,
+  destructiveOperationsEnabled,
+  evaluateDestructiveGate,
+  projectChangingTools
 };
