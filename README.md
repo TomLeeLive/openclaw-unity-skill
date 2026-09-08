@@ -36,14 +36,16 @@ openclaw gateway restart
 unity-plugin/
 ├── SKILL.md           # AI workflow guide (~100 tools)
 ├── extension/         # Gateway extension (for OpenClaw channels)
-│   ├── index.ts       # Includes the project-changing safety gate
+│   ├── index.ts       # Safety gate + authenticated bridge
 │   ├── dist/index.js  # Compiled bundle
 │   ├── openclaw.plugin.json
 │   └── package.json
 ├── scripts/
 │   └── install-extension.sh
 ├── tests/
-│   └── gate.test.mjs  # Safety-gate tests (no Unity needed)
+│   ├── gate.test.mjs    # Safety-gate tests (no Unity needed)
+│   ├── bridge.test.mjs  # Bridge auth, result nonce, session isolation
+│   └── dist.test.mjs    # The shipped bundle matches the source
 └── references/
     └── tools.md       # Detailed tool documentation
 ```
@@ -66,9 +68,59 @@ OPENCLAW_EDITOR_ALLOW_DESTRUCTIVE=1 openclaw gateway restart
 unity_execute: asset.delete {path: "Assets/Old/Item.prefab"}, confirm: true
 ```
 
+Custom tools count as project-changing (1.8.0). A name outside the built-in
+catalogue is a project-registered tool whose verb proves nothing, so
+`mygame.getScore` is gated exactly like `asset.delete`. To exempt one you have
+read, list its exact name on the gateway process:
+
+```bash
+OPENCLAW_UNITY_READONLY_CUSTOM_TOOLS="mygame.getScore" openclaw gateway restart
+```
+
+`script.execute`, `execute_code`, `execute_custom_tool` and `manage_tools` can
+never be exempted.
+
 `dryRun: true` previews any call without sending it. `openclaw unity status`
-shows whether project changes are currently enabled. Full details in
-[SKILL.md → Safety and permissions](SKILL.md#safety-and-permissions).
+shows the bridge auth state and whether project changes are enabled. Full details
+in [SKILL.md → Safety and permissions](SKILL.md#safety-and-permissions).
+
+## Bridge authentication
+
+The `/unity/*` endpoints are the Editor add-on's half of the bridge. Since 1.8.0
+they are authenticated and loopback-only.
+
+```
+gateway starts
+  └─ writes ~/.openclaw/unity-bridge.token   (32 random bytes, mode 0600)
+
+Unity add-on                                  gateway extension
+  POST /unity/register
+    X-OpenClaw-Bridge-Token: <file contents>  ──▶ 401 if missing/wrong
+                                              ◀── { sessionId, sessionToken }
+
+  GET  /unity/poll?sessionId=…
+    X-OpenClaw-Session: <sessionToken>        ──▶ 401 if missing/wrong
+                                              ◀── { toolCallId, tool, arguments, nonce }
+
+  POST /unity/result
+    X-OpenClaw-Session: <sessionToken>
+    { sessionId, toolCallId, nonce, result }  ──▶ 409 unless the nonce matches
+                                                   a call in flight for THIS session
+```
+
+- `$OPENCLAW_CONFIG_DIR` or `$OPENCLAW_HOME` override the token directory.
+- `OPENCLAW_BRIDGE_TOKEN` overrides the file on both sides.
+- Non-loopback peers get 403; so does any request with an `Origin` or `Referer`
+  header. No CORS headers are sent.
+- Tokens are never logged — only the token file's path is.
+- `OPENCLAW_UNITY_ALLOW_LEGACY_UNAUTHENTICATED=1` restores the pre-1.8.0
+  unauthenticated bridge for an old add-on, with a loud warning and
+  `auth: "legacy-unauthenticated"` in `GET /unity/status`. Update the add-on
+  instead.
+
+The Editor add-on's own MCP bridge (port 27182) has a separate per-launch token
+in `~/.openclaw/unity-mcp-bridge.token`; see the
+[plugin repository](https://github.com/TomLeeLive/openclaw-unity-plugin).
 
 ## Development
 
@@ -179,9 +231,5 @@ disableModelInvocation: false  # AI 자동 호출 허용
 
 ## License
 
-MIT License - See [LICENSE](LICENSE.md)
-
-## License
-
-This project has been licensed under [Apache-2.0](LICENSE) since its initial release.
+This project has been licensed under [Apache-2.0](LICENSE.md) since its initial release.
 Copyright 2026 Tom Lee (TomLeeLive)

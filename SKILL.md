@@ -1,7 +1,7 @@
 ---
 name: unity-plugin
-version: 1.7.0
-description: Control Unity Editor via OpenClaw Unity Plugin. Use for Unity game development tasks including scene management, GameObject/Component manipulation, debugging, input simulation, and Play mode control — including arbitrary C# execution (script.execute) and reflection-based editor calls, which can modify scenes, assets, and settings. Project-changing and destructive operations (delete, save, package install, code execution, input simulation) are refused at runtime unless the operator starts the gateway with OPENCLAW_EDITOR_ALLOW_DESTRUCTIVE=1 and the call passes confirm: true; read-only inspection needs neither, and dryRun: true previews any call without sending it. Use only in trusted local projects. Triggers on explicit Unity Editor requests like inspecting scenes, creating objects, taking screenshots, testing gameplay, or controlling the Editor.
+version: 1.8.0
+description: Control Unity Editor via OpenClaw Unity Plugin. Use for Unity game development tasks including scene management, GameObject/Component manipulation, debugging, input simulation, and Play mode control — including arbitrary C# execution (script.execute) and reflection-based editor calls, which can modify scenes, assets, and settings. Project-changing and destructive operations (delete, save, package install, code execution, input simulation) — and every project-registered custom tool, whatever its name reads like — are refused at runtime unless the operator starts the gateway with OPENCLAW_EDITOR_ALLOW_DESTRUCTIVE=1 and the call passes confirm: true; read-only built-in inspection needs neither, and dryRun: true previews any call without sending it. The local Editor bridge is authenticated with a per-launch token and serves 127.0.0.1 only. Use only in trusted local projects. Triggers on explicit Unity Editor requests like inspecting scenes, creating objects, taking screenshots, testing gameplay, or controlling the Editor.
 homepage: https://github.com/TomLeeLive/openclaw-unity-skill
 author: Tom Jaejoon Lee
 disableModelInvocation: true
@@ -26,10 +26,26 @@ behaviour is unchanged.
 destroy, save, `set*`, `component.add`/`remove`, `asset.*` writes, `prefab.*`,
 `material.*`, `texture.*`, `editor.refresh`/`recompile`, Play-mode control, input
 simulation, `test.run`, `script.execute` — and any `batch.execute` that carries
-one of them. The gateway extension refuses these by default. A tool name it does
-not recognise (project-registered custom tools included) counts as
-project-changing unless its verb is clearly read-only: the gate fails closed,
-never open.
+one of them. The gateway extension refuses these by default.
+
+**Custom tools are gated by default (1.8.0):** a name that is not in this
+skill's built-in catalogue is a project-registered custom tool — the Editor
+add-on's `OpenClawCustomTools.Register` lets a project publish a tool under any
+name — so its verb proves nothing. `mygame.getScore` is treated exactly like
+`asset.delete`: refused without the operator opt-in and `confirm: true`. Before
+1.8.0 such a name passed ungated whenever it started with `get`/`list`/`find`,
+which is what made the gate too weak to approve. To exempt one you have read:
+
+```bash
+# exact names, comma separated, on the gateway process
+OPENCLAW_UNITY_READONLY_CUSTOM_TOOLS="mygame.getScore,mygame.listEnemies" \
+  openclaw gateway restart
+```
+
+`script.execute`, `execute_code`, `execute_custom_tool`, `manage_tools` and
+anything whose name contains a destructive verb can never be declared read-only:
+the allowlist ignores those entries. The in-package allowlist
+(`READ_ONLY_CUSTOM_TOOLS` in `extension/index.ts`) is empty on purpose.
 
 **How to enable them** — both steps are required:
 
@@ -64,12 +80,57 @@ unity_execute: gameobject.destroy {name: "Player"}, dryRun: true
 project-changing tools are enabled, and `GET /unity/status` reports the same as
 `destructiveOperations: "enabled" | "blocked"`.
 
+**Bridge authentication (1.8.0):** the `/unity/*` endpoints this extension serves
+are the Editor add-on's half of the bridge. They now require a per-launch secret,
+and they answer loopback peers only.
+
+1. When the gateway loads this extension it generates a 32-byte token and writes
+   it to `~/.openclaw/unity-bridge.token` with mode `0600`
+   (`$OPENCLAW_CONFIG_DIR`/`$OPENCLAW_HOME` override the directory). The token is
+   never logged — only its path is.
+2. The Unity add-on reads that file (or `OPENCLAW_BRIDGE_TOKEN`, or the API Token
+   field of `OpenClawConfig`) and sends it as `X-OpenClaw-Bridge-Token` on
+   `POST /unity/register`. Without it: **401**, and no session exists.
+3. `register` answers with a per-session token. `poll`, `heartbeat` and `result`
+   must carry it as `X-OpenClaw-Session`, and it must belong to the `sessionId`
+   in the request. Otherwise: **401**.
+4. Every queued command carries a nonce. `POST /unity/result` is accepted only
+   for a tool call that is actually in flight for that session and only with
+   that call's nonce; anything else is dropped with **409** and never reaches the
+   model. That is what stops a third local process from answering in the
+   Editor's place.
+5. Requests from a non-loopback peer are refused with **403**, as is any request
+   carrying an `Origin` or `Referer` header — no browser may drive the bridge.
+   No CORS headers are sent (before 1.8.0 the bridge replied
+   `Access-Control-Allow-Origin: *`, which let any open web page reach it).
+
+Legacy behaviour is off by default. `OPENCLAW_UNITY_ALLOW_LEGACY_UNAUTHENTICATED=1`
+(or `OPENCLAW_EDITOR_ALLOW_LEGACY_UNAUTHENTICATED=1`) restores the pre-1.8.0
+unauthenticated bridge for an old add-on and logs a warning saying so; `openclaw
+unity status` and `GET /unity/status` report `auth: "legacy-unauthenticated"`
+while it is on. Update the add-on instead.
+
+**What the token does and does not buy:** the file is `0600`, so another user on
+the machine cannot read it. A process running **as you** can, and that is the
+same boundary that protects your SSH keys and the gateway's own config. The
+bridge is not a sandbox against your own account.
+
+**Session isolation (1.8.0):** each connected Editor gets its own session id,
+session token, command queue and in-flight table. One session cannot poll
+another's queue or answer another's tool call. When more than one Editor is
+connected, `unity_execute` refuses to guess and asks for an explicit `sessionId`
+— it will not silently drive the wrong project. Session tokens are never
+reported by `unity_sessions` or `GET /unity/status`.
+
 **Scope of the gate:** it lives in the gateway extension that ships with this
 skill (`extension/index.ts`), so it covers every call routed through the OpenClaw
 gateway — Telegram, Discord and the other channels. The Unity Editor add-on's
 local MCP bridge (port 27182, Mode 2 below) is a separate install from the plugin
-repository and is not gated by this package: keep that port on the local machine
-and review the plugin repository for its own controls.
+repository; from plugin 1.7.0 it has its own per-launch token
+(`~/.openclaw/unity-mcp-bridge.token`, mode 0600), refuses browser-originated
+requests and binds 127.0.0.1 only, but it is **not** covered by this
+confirmation gate: an MCP client that holds that token talks to the Editor
+directly.
 
 ## Connection Modes
 
@@ -472,11 +533,13 @@ This skill drives a live Unity Editor — treat it like giving a collaborator ed
 
 - **Arbitrary code execution (by design)**: `script.execute` compiles and runs C# inside the Unity process, and several tools use reflection to reach editor internals. This is the core of editor automation — it also means the skill can do anything the editor can. **Only use in trusted, version-controlled projects.** Ask the user to review C# snippets before running code they didn't write.
 - **Destructive operations are gated at runtime (v1.7.0+)**: deleting GameObjects/assets, saving scenes/projects, installing packages, simulating keyboard/mouse input and running `script.execute` are refused by the gateway extension unless it was started with `OPENCLAW_EDITOR_ALLOW_DESTRUCTIVE=1` **and** the call carries `confirm: true`. Confirm the change with the user before setting it — see [Safety and permissions](#safety-and-permissions).
+- **Custom tools are gated too (v1.8.0+)**: any tool name outside the built-in catalogue — including tools a project registers through `OpenClawCustomTools` — is classified project-changing whatever its verb reads like, and `execute_code`/`manage_tools`/`execute_custom_tool`/`script.execute` can never be exempted.
+- **The bridge is authenticated (v1.8.0+)**: `/unity/*` needs a per-launch token from `~/.openclaw/unity-bridge.token` (mode 0600) to register, a per-session token on every later request, and the issued nonce on every result. Non-loopback peers and browser-originated requests get 403. A process running as your user can read the token file — that is the boundary.
 - **Package installation**: Git-based package installs import external, unvetted code into the project. Verify the source URL with the user first.
 - **Metadata**: the connection handshake includes machine name and process ID (used to route messages to the right editor instance). No other host information is collected or transmitted.
-- **Network surface**: MCP bridge listens on localhost port 27182. Keep it bound to localhost; do not expose the port beyond the local machine or a trusted network.
+- **Network surface**: the gateway serves `/unity/*` to loopback peers only and requires the bridge token; the Editor add-on's MCP bridge listens on 127.0.0.1:27182 and (from plugin 1.7.0) requires its own token. Do not port-forward or reverse-proxy either one.
 - **Trigger scope**: routine-sounding requests ("clean up the scene", "save everything", "just try it") map to state-changing editor operations — confirm once before the first state-changing call in a session.
-- **Safety defaults**: `disableModelInvocation: true` is set — the model cannot auto-invoke this skill; it runs only on explicit user request. Project-changing tools default to refused, and `dryRun: true` previews any call without sending it. Keep project backups / source control current before automation sessions.
+- **Safety defaults**: `disableModelInvocation: true` is set — the model cannot auto-invoke this skill; it runs only on explicit user request. Project-changing tools default to refused, custom tools count as project-changing, the bridge requires a token, and `dryRun: true` previews any call without sending it. Keep project backups / source control current before automation sessions.
 
 ## Links
 
