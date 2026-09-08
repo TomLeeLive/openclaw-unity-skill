@@ -1,7 +1,7 @@
 ---
 name: unity-plugin
-version: 1.6.3
-description: Control Unity Editor via OpenClaw Unity Plugin. Use for Unity game development tasks including scene management, GameObject/Component manipulation, debugging, input simulation, and Play mode control — including arbitrary C# execution (script.execute) and reflection-based editor calls, which can modify scenes, assets, and settings. Use only in trusted local projects; destructive operations (delete, save, package install, code execution) should be confirmed with the user. Triggers on explicit Unity Editor requests like inspecting scenes, creating objects, taking screenshots, testing gameplay, or controlling the Editor.
+version: 1.7.0
+description: Control Unity Editor via OpenClaw Unity Plugin. Use for Unity game development tasks including scene management, GameObject/Component manipulation, debugging, input simulation, and Play mode control — including arbitrary C# execution (script.execute) and reflection-based editor calls, which can modify scenes, assets, and settings. Project-changing and destructive operations (delete, save, package install, code execution, input simulation) are refused at runtime unless the operator starts the gateway with OPENCLAW_EDITOR_ALLOW_DESTRUCTIVE=1 and the call passes confirm: true; read-only inspection needs neither, and dryRun: true previews any call without sending it. Use only in trusted local projects. Triggers on explicit Unity Editor requests like inspecting scenes, creating objects, taking screenshots, testing gameplay, or controlling the Editor.
 homepage: https://github.com/TomLeeLive/openclaw-unity-skill
 author: Tom Jaejoon Lee
 disableModelInvocation: true
@@ -10,6 +10,59 @@ disableModelInvocation: true
 # Unity Plugin Skill
 
 Control Unity Editor through **~100 built-in tools**. Works in both Editor and Play mode.
+
+## Safety and permissions
+
+**What this skill can change:** anything the Unity Editor can — GameObjects and
+components, scenes, prefabs, materials, shaders, textures and ScriptableObjects,
+files under `Assets/`, installed packages, Play mode, and arbitrary C# run inside
+the Editor process (`script.execute`, plus reflection-based calls).
+
+**What runs without asking:** read-only tools only — `get*`, `list`, `find`,
+`script.read`, `debug.hierarchy`, `debug.screenshot`, `console.getLogs`. Their
+behaviour is unchanged.
+
+**What is gated at runtime:** every project-changing tool — create, delete,
+destroy, save, `set*`, `component.add`/`remove`, `asset.*` writes, `prefab.*`,
+`material.*`, `texture.*`, `editor.refresh`/`recompile`, Play-mode control, input
+simulation, `test.run`, `script.execute` — and any `batch.execute` that carries
+one of them. The gateway extension refuses these by default. A tool name it does
+not recognise (project-registered custom tools included) counts as
+project-changing unless its verb is clearly read-only: the gate fails closed,
+never open.
+
+**How to enable them** — both steps are required:
+
+1. The operator starts the gateway with the opt-in environment variable. It is
+   read from the gateway process, so the model cannot set it:
+
+   ```bash
+   OPENCLAW_EDITOR_ALLOW_DESTRUCTIVE=1 openclaw gateway restart
+   # or, scoped to this skill only:
+   OPENCLAW_UNITY_ALLOW_DESTRUCTIVE=1 openclaw gateway restart
+   ```
+
+2. The caller passes `confirm: true` on each project-changing call, after the
+   user has approved that specific change:
+
+   ```
+   unity_execute: asset.delete {path: "Assets/Old/Item.prefab"}, confirm: true
+   ```
+
+Missing either one is a refusal with an explanation of what was blocked and how
+to allow it. Nothing reaches the Editor in the meantime.
+
+**Preview first:** `dryRun: true` reports how a call is classified and what would
+be sent, and sends nothing:
+
+```
+unity_execute: gameobject.destroy {name: "Player"}, dryRun: true
+→ {risk: "project-changing", requiresConfirmation: true, wouldRun: false, executed: false}
+```
+
+**Check the current state:** `openclaw unity status` prints whether
+project-changing tools are enabled, and `GET /unity/status` reports the same as
+`destructiveOperations: "enabled" | "blocked"`.
 
 ## Connection Modes
 
@@ -65,8 +118,10 @@ When publishing to ClawHub, `disableModelInvocation` controls who may start the 
 
 **Reason:** this skill can execute arbitrary C# inside the Editor (`script.execute`)
 and call Editor APIs by reflection. That is the whole point of it, and it is also
-why it should never start on its own inference. As of v1.6.3 this skill ships with
-`disableModelInvocation: true` — it runs only on explicit user request.
+why it should never start on its own inference. As of v1.7.0 this skill ships with
+`disableModelInvocation: true` — it runs only on explicit user request, and every
+project-changing call is gated on top of that (see
+[Safety and permissions](#safety-and-permissions)).
 
 The full capability disclosure — arbitrary code execution, destructive operations,
 network surface — is in [Security & Privacy Disclosure](#security--privacy-disclosure)
@@ -171,9 +226,12 @@ unity_execute: test.getResults
 
 ### 10. Script Execution (Enhanced)
 
+`script.execute` is project-changing: it needs the operator opt-in and
+`confirm: true` on every call (see [Safety and permissions](#safety-and-permissions)).
+
 ```
 # Debug logging
-unity_execute: script.execute {code: "Debug.Log('Hello')"}
+unity_execute: script.execute {code: "Debug.Log('Hello')"}, confirm: true
 
 # Time manipulation
 unity_execute: script.execute {code: "Time.timeScale = 0.5"}
@@ -406,12 +464,12 @@ Keyboard/mouse simulation works for **UI interactions** but NOT for `Input.GetKe
 This skill drives a live Unity Editor — treat it like giving a collaborator editor access. Full disclosure of capabilities:
 
 - **Arbitrary code execution (by design)**: `script.execute` compiles and runs C# inside the Unity process, and several tools use reflection to reach editor internals. This is the core of editor automation — it also means the skill can do anything the editor can. **Only use in trusted, version-controlled projects.** Ask the user to review C# snippets before running code they didn't write.
-- **Destructive operations** — confirm with the user before: deleting GameObjects/assets, saving scenes/projects, installing packages, simulating keyboard/mouse input, running `script.execute`.
+- **Destructive operations are gated at runtime (v1.7.0+)**: deleting GameObjects/assets, saving scenes/projects, installing packages, simulating keyboard/mouse input and running `script.execute` are refused by the gateway extension unless it was started with `OPENCLAW_EDITOR_ALLOW_DESTRUCTIVE=1` **and** the call carries `confirm: true`. Confirm the change with the user before setting it — see [Safety and permissions](#safety-and-permissions).
 - **Package installation**: Git-based package installs import external, unvetted code into the project. Verify the source URL with the user first.
 - **Metadata**: the connection handshake includes machine name and process ID (used to route messages to the right editor instance). No other host information is collected or transmitted.
 - **Network surface**: MCP bridge listens on localhost port 27182. Keep it bound to localhost; do not expose the port beyond the local machine or a trusted network.
 - **Trigger scope**: routine-sounding requests ("clean up the scene", "save everything", "just try it") map to state-changing editor operations — confirm once before the first state-changing call in a session.
-- **Safety defaults**: `disableModelInvocation: true` is set — the model cannot auto-invoke this skill; it runs only on explicit user request. Keep project backups / source control current before automation sessions.
+- **Safety defaults**: `disableModelInvocation: true` is set — the model cannot auto-invoke this skill; it runs only on explicit user request. Project-changing tools default to refused, and `dryRun: true` previews any call without sending it. Keep project backups / source control current before automation sessions.
 
 ## Links
 
