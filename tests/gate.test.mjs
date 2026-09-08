@@ -7,12 +7,23 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+// register() below creates the bridge, which writes its per-launch token into
+// the OpenClaw config dir. Keep that out of the developer's real ~/.openclaw.
+process.env.OPENCLAW_CONFIG_DIR = mkdtempSync(join(tmpdir(), "openclaw-unity-test-"));
 
 import {
+  ALWAYS_PROJECT_CHANGING,
+  BUILTIN_TOOLS,
   classifyTool,
   destructiveOperationsEnabled,
   evaluateDestructiveGate,
+  isCustomTool,
   projectChangingTools,
+  readOnlyCustomTools,
 } from "../extension/index.ts";
 import plugin from "../extension/index.ts";
 
@@ -178,6 +189,15 @@ test("every catalogued tool is classified, and only read-only ones pass ungated"
   assert.equal(CATALOG.filter((t) => READ_ONLY.has(t)).length, READ_ONLY.size);
 });
 
+test("the built-in catalogue the gate ships matches the documented tool list", () => {
+  const documented = new Set(CATALOG.map((tool) => tool.toLowerCase()));
+  const missing = [...documented].filter((tool) => !BUILTIN_TOOLS.has(tool));
+  const extra = [...BUILTIN_TOOLS].filter((tool) => !documented.has(tool));
+  assert.deepEqual(missing, [], "tools documented but unknown to the gate");
+  assert.deepEqual(extra, [], "tools the gate treats as built-in but nobody documents");
+  for (const tool of CATALOG) assert.equal(isCustomTool(tool), false, tool);
+});
+
 test("read-only calls are unaffected by the gate", () => {
   for (const tool of CATALOG.filter((t) => READ_ONLY.has(t))) {
     const decision = evaluateDestructiveGate({ tool, env: OFF });
@@ -266,8 +286,84 @@ test("the gate fails closed on unknown, unnamed and malformed calls", () => {
     }),
     "project-changing"
   );
-  // A custom read-only tool still passes: the allowlist is on the verb.
-  assert.equal(classifyTool("mygame.getScore"), "read-only");
+  // A custom tool whose verb reads like a query is still gated: the Editor
+  // add-on lets a project register anything under any name.
+  assert.equal(classifyTool("mygame.getScore"), "project-changing");
+});
+
+// ---------------------------------------------------------------------------
+// Custom (project-registered) tools
+
+test("custom tools are project-changing whatever their verb reads like", () => {
+  const readOnlyLooking = [
+    "mygame.getScore",
+    "mygame.listEnemies",
+    "mygame.findPlayer",
+    "mygame.readSave",
+    "status_of_everything",
+    "get_state",
+    "inspect_thing",
+  ];
+  for (const tool of readOnlyLooking) {
+    assert.equal(isCustomTool(tool), true, tool);
+    assert.equal(classifyTool(tool, undefined, 0, OFF), "project-changing", tool);
+    const decision = evaluateDestructiveGate({ tool, env: OFF });
+    assert.equal(decision.allowed, false, tool);
+    assert.equal(decision.custom, true, tool);
+    assert.match(decision.message, /custom tool/i);
+  }
+});
+
+test("a custom tool passes only when it is declared read-only", () => {
+  const env = { OPENCLAW_UNITY_READONLY_CUSTOM_TOOLS: "mygame.getScore, mygame.listEnemies" };
+  assert.deepEqual(
+    [...readOnlyCustomTools(env)].sort(),
+    ["mygame.getscore", "mygame.listenemies"]
+  );
+
+  assert.equal(classifyTool("mygame.getScore", undefined, 0, env), "read-only");
+  assert.equal(classifyTool("MyGame.GetScore", undefined, 0, env), "read-only");
+  assert.equal(
+    evaluateDestructiveGate({ tool: "mygame.getScore", env }).allowed,
+    true
+  );
+  // Anything not on the list stays gated.
+  assert.equal(classifyTool("mygame.findPlayer", undefined, 0, env), "project-changing");
+});
+
+test("code execution and tool management can never be declared read-only", () => {
+  const env = {
+    OPENCLAW_UNITY_READONLY_CUSTOM_TOOLS:
+      "execute_code, manage_tools, execute_custom_tool, script.execute, mygame.deleteSave, asset.delete",
+    OPENCLAW_EDITOR_ALLOW_DESTRUCTIVE: "1",
+  };
+  assert.deepEqual([...readOnlyCustomTools(env)], []);
+  for (const tool of [
+    "execute_code",
+    "manage_tools",
+    "execute_custom_tool",
+    "script.execute",
+    "mygame.deleteSave",
+    "asset.delete",
+  ]) {
+    assert.equal(classifyTool(tool, undefined, 0, env), "project-changing", tool);
+    assert.equal(
+      evaluateDestructiveGate({ tool, env }).reason,
+      "confirmation-missing",
+      tool
+    );
+  }
+  for (const tool of ["execute_code", "manage_tools", "execute_custom_tool", "script.execute"]) {
+    assert.equal(ALWAYS_PROJECT_CHANGING.has(tool), true, tool);
+  }
+});
+
+test("a batch cannot smuggle a custom tool past the gate", () => {
+  const batch = {
+    commands: [{ tool: "debug.hierarchy" }, { tool: "mygame.getScore" }],
+  };
+  assert.equal(classifyTool("batch.execute", batch, 0, OFF), "project-changing");
+  assert.deepEqual(projectChangingTools("batch.execute", batch, 0, OFF), ["mygame.getScore"]);
 });
 
 test("the operator opt-in is read from either environment variable", () => {
