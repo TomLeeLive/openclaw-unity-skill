@@ -64,6 +64,13 @@ unity_execute: gameobject.destroy {name: "Player"}, dryRun: true
 project-changing tools are enabled, and `GET /unity/status` reports the same as
 `destructiveOperations: "enabled" | "blocked"`.
 
+**Scope of the gate:** it lives in the gateway extension that ships with this
+skill (`extension/index.ts`), so it covers every call routed through the OpenClaw
+gateway — Telegram, Discord and the other channels. The Unity Editor add-on's
+local MCP bridge (port 27182, Mode 2 below) is a separate install from the plugin
+repository and is not gated by this package: keep that port on the local machine
+and review the plugin repository for its own controls.
+
 ## Connection Modes
 
 ### 1. OpenClaw Gateway (Remote)
